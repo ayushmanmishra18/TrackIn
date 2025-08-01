@@ -1,60 +1,57 @@
-// Import necessary modules
+// Load environment variables from .env file
+require('dotenv').config();
+
 const express = require('express');
-const path = require('path');
-const http = require('http');
-const socketio = require('socket.io');
-
-// Initialize Express app and HTTP server
 const app = express();
-const server = http.createServer(app);
-const io = socketio(server); // Initialize Socket.IO for real-time communication
+const http = require('http').createServer(app);
+const io = require('socket.io')(http);
+const path = require('path');
 
-// ----------- Configuration Section -----------
+// Port and Admin Secret from .env
 
-// Set view engine to EJS for templating
-app.set('view engine', 'ejs');
+const ADMIN_SECRET = process.env.ADMIN_SECRET || 'defaultsecret';
 
-// Set views directory explicitly
-app.set('views', path.join(__dirname, 'views'));
-
-// Serve static files from the 'public' folder (e.g., CSS, client JS, images)
+// Serve static files
 app.use(express.static(path.join(__dirname, 'public')));
 
-// ----------- Real-Time WebSocket Events -----------
+// Set EJS as view engine
+app.set('view engine', 'ejs');
+app.set('views', path.join(__dirname, 'views'));
 
-io.on("connection", (socket) => {
-    console.log(`Client connected: ${socket.id}`);
+// Track connected users and their location info
+const userInfo = {};
 
-    // Handle incoming location data from a user
-    socket.on("send-location", (data) => {
-        // Broadcast location to all connected clients (admin or user)
-        io.emit("Received location", { id: socket.id, ...data });
-    });
-
-    // Handle disconnection: inform others that this user left
-    socket.on("disconnect", () => {
-        io.emit("user-disconnected", socket.id);
-        console.log(`Client disconnected: ${socket.id}`);
-    });
-});
-
-// ----------- Routes -----------
-
-// Render the homepage using EJS (views/index.ejs)
+// Route to serve main page and inject admin secret
 app.get('/', (req, res) => {
-    res.render('index', { title: 'Home Page' });
+  res.render('index', { adminSecret: ADMIN_SECRET });
 });
 
-// ----------- Error Handling -----------
+// Socket.IO handling
+io.on('connection', (socket) => {
+  console.log(`User connected: ${socket.id}`);
 
-app.use((err, req, res, next) => {
-    console.error(err.stack);
-    res.status(500).send('Something broke!');
+  // When a user shares their location
+  socket.on('locationUpdate', (data) => {
+    userInfo[socket.id] = {
+      latitude: data.latitude,
+      longitude: data.longitude,
+      accuracy: data.accuracy,
+      lastUpdated: new Date().toLocaleTimeString()
+    };
+
+    // Broadcast updated locations to all clients
+    io.emit('locationData', userInfo);
+  });
+
+  // On disconnect, remove user
+  socket.on('disconnect', () => {
+    console.log(`User disconnected: ${socket.id}`);
+    delete userInfo[socket.id];
+    io.emit('locationData', userInfo);
+  });
 });
 
-// ----------- Start Server -----------
-
-const PORT = process.env.PORT || 4000;
-server.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
+// Start server
+http.listen(4000, () => {
+  console.log(`Server running on http://localhost:4000`);
 });

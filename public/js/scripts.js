@@ -1,122 +1,92 @@
-// Determine user role (admin or normal user) via URL query parameter
-const isAdmin = new URLSearchParams(window.location.search).get("admin") === "true";
+const socket = io();
+const map = L.map('map').setView([20.5937, 78.9629], 5); // Default to India
 
-// Connect to server with role information
-const socket = io({ query: { role: isAdmin ? "admin" : "user" } });
+const userListEl = document.getElementById('user-list');
+const isAdmin = window.location.search.includes(`admin=${window.ADMIN_SECRET}`);
 
-// Initialize Leaflet map with default zoom and center
-const map = L.map('map').setView([0, 0], 16);
+const markers = {}; // Store markers for all users
 
-// Use OpenStreetMap tile layer
+// Set up the map with OpenStreetMap tiles
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-  attribution: "<h1>ayushman</h1>"
+  attribution: '&copy; OpenStreetMap contributors'
 }).addTo(map);
 
-// Object to track map markers by socket ID
-const markers = {};
-
+// Get user location with permission
 if (navigator.geolocation) {
-  // Set geolocation options
-  const geoOptions = {
-    enableHighAccuracy: true,
-    timeout: 5000,
-    maximumAge: 0
-  };
-
-  // Watch user's location continuously
-  const watchId = navigator.geolocation.watchPosition(
+  navigator.geolocation.watchPosition(
     (position) => {
-      const { latitude, longitude, accuracy } = position.coords;
-
-      console.log(`Position: ${latitude}, ${longitude} (±${accuracy}m)`);
-
-      // Only send location if GPS accuracy is acceptable (< 100 meters)
-      if (accuracy < 100) {
-        socket.emit("send-location", {
-          latitude,
-          longitude,
-          accuracy,
-          timestamp: new Date().toISOString()
-        });
-
-        // Update user’s own marker if not an admin
-        if (!isAdmin) {
-          if (markers[socket.id]) {
-            markers[socket.id].setLatLng([latitude, longitude]);
-          } else {
-            markers[socket.id] = L.marker([latitude, longitude])
-              .addTo(map)
-              .bindPopup("You");
-          }
-
-          // Center the map to the user's location
-          map.setView([latitude, longitude], 15);
-        }
-      } else {
-        console.warn("Low GPS accuracy:", accuracy);
-      }
+      const data = {
+        latitude: position.coords.latitude,
+        longitude: position.coords.longitude,
+        accuracy: position.coords.accuracy
+      };
+      socket.emit('locationUpdate', data);
     },
     (error) => {
-      // Handle geolocation errors
-      let message;
-      switch (error.code) {
-        case error.PERMISSION_DENIED:
-          message = "Location access denied.";
-          break;
-        case error.POSITION_UNAVAILABLE:
-          message = "Location unavailable.";
-          break;
-        case error.TIMEOUT:
-          message = "Location request timed out.";
-          break;
-        default:
-          message = "Unknown geolocation error.";
-      }
-      console.error(message);
-      alert(message);
+      alert('Location access denied or error fetching location');
+      console.error(error);
     },
-    geoOptions
+    { enableHighAccuracy: true }
   );
-
-  // Cleanup geolocation watcher on window unload
-  window.addEventListener("beforeunload", () => {
-    navigator.geolocation.clearWatch(watchId);
-  });
-
 } else {
-  // Handle unsupported geolocation
-  alert("Geolocation is not supported by your browser.");
+  alert('Geolocation is not supported by your browser.');
 }
 
-// ----- Receiving Locations from Server -----
+// Listen for updated location data from server
+socket.on('locationData', (userInfo) => {
+  renderUserList(userInfo);
 
-socket.on("Received location", (data) => {
-  const { id, latitude, longitude } = data;
+  Object.entries(userInfo).forEach(([id, info]) => {
+    const { latitude, longitude } = info;
 
-  // If user is not admin, only allow them to see their own location
-  if (!isAdmin && id !== socket.id) return;
-
-  // Update marker if it already exists, otherwise create one
-  if (markers[id]) {
-    markers[id].setLatLng([latitude, longitude]);
-  } else {
-    const label = id === socket.id ? "You" : `User: ${id}`;
-    markers[id] = L.marker([latitude, longitude])
-      .addTo(map)
-      .bindPopup(label);
-  }
-
-  // Center map for the user on their own location
-  if (id === socket.id) {
-    map.setView([latitude, longitude], 15);
-  }
+    // If marker exists, just update position
+    if (markers[id]) {
+      markers[id].setLatLng([latitude, longitude]);
+    } else {
+      // Create a new marker
+      markers[id] = L.marker([latitude, longitude], {
+        title: id === socket.id ? 'You' : `User ${id}`,
+        icon: L.icon({
+          iconUrl: id === socket.id
+            ? 'https://cdn-icons-png.flaticon.com/512/1077/1077012.png' // user icon
+            : 'https://cdn-icons-png.flaticon.com/512/684/684908.png',   // others
+          iconSize: [30, 30],
+          iconAnchor: [15, 30],
+        })
+      }).addTo(map);
+    }
+  });
 });
 
-// ----- Handle Disconnection of Users -----
-
-socket.on("user-disconnected", (id) => {
-  if (markers[id]) {
-    map.removeLayer(markers[id]); // Remove marker from map
-    delete markers[id];           // Remove from tracking object
+// Render user list (only for admin)
+function renderUserList(userInfo) {
+  if (!isAdmin) {
+    // Regular user should not see others
+    userListEl.innerHTML = '';
+    const info = userInfo[socket.id];
+    if (info) {
+      const li = document.createElement('li');
+      li.innerHTML = `
+        <strong>You</strong><br>
+        📍 ${info.latitude}, ${info.longitude}<br>
+        🎯 Accuracy: ${info.accuracy}m<br>
+        🕒 ${info.lastUpdated}
+      `;
+      userListEl.appendChild(li);
+    }
+    return;
   }
-});
+
+  // Admin sees all users
+  userListEl.innerHTML = '';
+  Object.entries(userInfo).forEach(([id, info]) => {
+    const li = document.createElement('li');
+    li.innerHTML = `
+      <strong>${id === socket.id ? "You" : id}</strong><br>
+      📍 ${info.latitude}, ${info.longitude}<br>
+      🎯 Accuracy: ${info.accuracy}m<br>
+      🕒 ${info.lastUpdated}
+    `;
+    userListEl.appendChild(li);
+  });
+}
