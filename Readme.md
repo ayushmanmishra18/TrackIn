@@ -70,13 +70,10 @@ This is a real-time web application that tracks users' geographic location on a 
 
 ### 1. Clone the Repository
 
-```bash
 git clone https://github.com/ayushmanmishra18/TrackIn.git
 
 2. Install Dependencies
-bash
-Copy
-Edit
+
 npm install
 3. Start the Server
 
