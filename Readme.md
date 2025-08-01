@@ -44,8 +44,13 @@ This is a real-time web application that tracks users' geographic location on a 
 | Leaflet.js  | Interactive mapping          |
 | HTML/CSS    | Frontend structure and style |
 
----
 
+
+
+
+
+
+```text
 ## 📁 Project Structure
 
 ├── public/
@@ -58,12 +63,8 @@ This is a real-time web application that tracks users' geographic location on a 
 ├── app.js
 ├── package.json
 └── README.md
+```
 
-yaml
-Copy
-Edit
-
----
 
 ## 🚀 How to Run Locally
 
