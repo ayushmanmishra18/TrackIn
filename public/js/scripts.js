@@ -1,100 +1,122 @@
-const socket =io();
+// Determine user role (admin or normal user) via URL query parameter
+const isAdmin = new URLSearchParams(window.location.search).get("admin") === "true";
 
+// Connect to server with role information
+const socket = io({ query: { role: isAdmin ? "admin" : "user" } });
 
-if (navigator.geolocation) {
-  const geoOptions = {
-    enableHighAccuracy: true,  // Use GPS if available
-    timeout: 5000,            // 5 seconds (in milliseconds)
-    maximumAge: 0             // No cached position
-  };
+// Initialize Leaflet map with default zoom and center
+const map = L.map('map').setView([0, 0], 16);
 
-  const watchId = navigator.geolocation.watchPosition(
-    (position) => {
-      try {
-        const { latitude, longitude } = position.coords;
-        const accuracy = position.coords.accuracy; // Accuracy in meters
-        
-        console.log(`Position: ${latitude}, ${longitude} (±${accuracy}m)`);
-        
-        // Only send if accuracy is reasonable (under 100 meters)
-        if (accuracy < 100) {
-          socket.emit('send-location', { 
-            latitude, 
-            longitude,
-            accuracy,
-            timestamp: new Date().toISOString()
-          });
-        } else {
-          console.warn('Position accuracy too low:', accuracy);
-        }
-      } catch (err) {
-        console.error('Error processing position:', err);
-      }
-    },
-    (error) => {
-      // Detailed error handling
-      let errorMessage;
-      switch(error.code) {
-        case error.PERMISSION_DENIED:
-          errorMessage = "Location access denied. Please enable permissions.";
-          break;
-        case error.POSITION_UNAVAILABLE:
-          errorMessage = "Location information unavailable.";
-          break;
-        case error.TIMEOUT:
-          errorMessage = "Location request timed out.";
-          break;
-        default:
-          errorMessage = `Unknown error: ${error.message}`;
-      }
-      
-      console.error('Geolocation error:', errorMessage);
-      alert(errorMessage); // Or show a user-friendly message
-    },
-    geoOptions
-  );
-
-  // Cleanup when needed (e.g., on page unload)
-  window.addEventListener('beforeunload', () => {
-    navigator.geolocation.clearWatch(watchId);
-  });
-} else {
-  const message = "Geolocation is not supported by your browser";
-  console.error(message);
-  alert(message);
-}
-
-  const map = L.map('map').setView([0, 0], 16); // Start with zoom level 2 (world view)
-
+// Use OpenStreetMap tile layer
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
   attribution: "<h1>ayushman</h1>"
 }).addTo(map);
 
+// Object to track map markers by socket ID
 const markers = {};
+
+if (navigator.geolocation) {
+  // Set geolocation options
+  const geoOptions = {
+    enableHighAccuracy: true,
+    timeout: 5000,
+    maximumAge: 0
+  };
+
+  // Watch user's location continuously
+  const watchId = navigator.geolocation.watchPosition(
+    (position) => {
+      const { latitude, longitude, accuracy } = position.coords;
+
+      console.log(`Position: ${latitude}, ${longitude} (±${accuracy}m)`);
+
+      // Only send location if GPS accuracy is acceptable (< 100 meters)
+      if (accuracy < 100) {
+        socket.emit("send-location", {
+          latitude,
+          longitude,
+          accuracy,
+          timestamp: new Date().toISOString()
+        });
+
+        // Update user’s own marker if not an admin
+        if (!isAdmin) {
+          if (markers[socket.id]) {
+            markers[socket.id].setLatLng([latitude, longitude]);
+          } else {
+            markers[socket.id] = L.marker([latitude, longitude])
+              .addTo(map)
+              .bindPopup("You");
+          }
+
+          // Center the map to the user's location
+          map.setView([latitude, longitude], 15);
+        }
+      } else {
+        console.warn("Low GPS accuracy:", accuracy);
+      }
+    },
+    (error) => {
+      // Handle geolocation errors
+      let message;
+      switch (error.code) {
+        case error.PERMISSION_DENIED:
+          message = "Location access denied.";
+          break;
+        case error.POSITION_UNAVAILABLE:
+          message = "Location unavailable.";
+          break;
+        case error.TIMEOUT:
+          message = "Location request timed out.";
+          break;
+        default:
+          message = "Unknown geolocation error.";
+      }
+      console.error(message);
+      alert(message);
+    },
+    geoOptions
+  );
+
+  // Cleanup geolocation watcher on window unload
+  window.addEventListener("beforeunload", () => {
+    navigator.geolocation.clearWatch(watchId);
+  });
+
+} else {
+  // Handle unsupported geolocation
+  alert("Geolocation is not supported by your browser.");
+}
+
+// ----- Receiving Locations from Server -----
+
 socket.on("Received location", (data) => {
   const { id, latitude, longitude } = data;
 
-  if (id === socket.id) {
-  map.setView([latitude, longitude], 15); 
-}
+  // If user is not admin, only allow them to see their own location
+  if (!isAdmin && id !== socket.id) return;
 
-  if(markers[id]){
+  // Update marker if it already exists, otherwise create one
+  if (markers[id]) {
     markers[id].setLatLng([latitude, longitude]);
-  }
-  else{
-    markers[id] = L.marker([latitude, longitude]).addTo(map).bindPopup(`User: ${id}`);;
+  } else {
+    const label = id === socket.id ? "You" : `User: ${id}`;
+    markers[id] = L.marker([latitude, longitude])
+      .addTo(map)
+      .bindPopup(label);
   }
 
-
+  // Center map for the user on their own location
+  if (id === socket.id) {
+    map.setView([latitude, longitude], 15);
+  }
 });
+
+// ----- Handle Disconnection of Users -----
 
 socket.on("user-disconnected", (id) => {
   if (markers[id]) {
-    map.removeLayer(markers[id]);
-    delete markers[id];
+    map.removeLayer(markers[id]); // Remove marker from map
+    delete markers[id];           // Remove from tracking object
   }
 });
-
-
-
-    
