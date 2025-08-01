@@ -72,11 +72,11 @@ ADMIN_SECRET=your_custom_secret
 
 ### 4. Start the server
 ```bash
-npm start
+node app.js
 ```
 
-> Visit: `http://localhost:3000`  
-> For admin: `http://localhost:3000/?admin=your_custom_secret`
+> Visit: `http://localhost:4000`  
+> For admin: `http://localhost:4000/?admin=your_custom_secret`
 
 ---
 
